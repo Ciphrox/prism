@@ -3,4 +3,10 @@ name = "prism"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
 [dependencies]
+protocol = { path = "crates/protocol" }
+transport = { path = "crates/transport" }
