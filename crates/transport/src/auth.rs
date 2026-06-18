@@ -2,20 +2,20 @@ use std::sync::Arc;
 
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
-use rustls::{ClientConfig, ServerConfig, SignatureScheme};
+use rustls::{ClientConfig, DigitallySignedStruct, ServerConfig, SignatureScheme};
 
 #[derive(Debug)]
 struct InsecureVerifier;
 impl ServerCertVerifier for InsecureVerifier {
     fn verify_server_cert(
         &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
         _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
+        _now: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
         Ok(ServerCertVerified::assertion())
     }
@@ -23,8 +23,8 @@ impl ServerCertVerifier for InsecureVerifier {
     fn verify_tls12_signature(
         &self,
         _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
         Ok(HandshakeSignatureValid::assertion())
     }
@@ -32,8 +32,8 @@ impl ServerCertVerifier for InsecureVerifier {
     fn verify_tls13_signature(
         &self,
         _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
         Ok(HandshakeSignatureValid::assertion())
     }
@@ -51,11 +51,11 @@ struct PinningVerifier {
 impl ServerCertVerifier for PinningVerifier {
     fn verify_server_cert(
         &self,
-        end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
+        end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
         _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
+        _now: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
         if end_entity.as_ref() == self.expected_cert {
             Ok(ServerCertVerified::assertion())
@@ -67,8 +67,8 @@ impl ServerCertVerifier for PinningVerifier {
     fn verify_tls12_signature(
         &self,
         _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
         Ok(HandshakeSignatureValid::assertion())
     }
@@ -76,8 +76,8 @@ impl ServerCertVerifier for PinningVerifier {
     fn verify_tls13_signature(
         &self,
         _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
         Ok(HandshakeSignatureValid::assertion())
     }
@@ -99,9 +99,9 @@ impl ClientCertVerifier for TrustedClientVerifier {
 
     fn verify_client_cert(
         &self,
-        end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _now: rustls::pki_types::UnixTime,
+        end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _now: UnixTime,
     ) -> Result<ClientCertVerified, rustls::Error> {
         if self
             .trusted_certs
@@ -117,8 +117,8 @@ impl ClientCertVerifier for TrustedClientVerifier {
     fn verify_tls12_signature(
         &self,
         _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
         Ok(HandshakeSignatureValid::assertion())
     }
@@ -126,8 +126,8 @@ impl ClientCertVerifier for TrustedClientVerifier {
     fn verify_tls13_signature(
         &self,
         _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
         Ok(HandshakeSignatureValid::assertion())
     }
@@ -145,15 +145,33 @@ pub fn create_insecure_client_config(
     let key = PrivateKeyDer::try_from(client_key)
         .map_err(|e| anyhow::anyhow!("Invalid private key: {}", e))?;
 
-    let mut rustls_config = quinn::rustls::ClientConfig::builder()
+    let mut rustls_config = ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(InsecureVerifier))
         .with_client_auth_cert(vec![cert], key)?;
     rustls_config.alpn_protocols = vec![b"prism".to_vec()];
 
-    let quic_config = quinn::crypto::rustls::QuicClientConfig::try_from(rustls_config)?;
+    let quic_config = QuicClientConfig::try_from(rustls_config)?;
 
     Ok(quinn::ClientConfig::new(Arc::new(quic_config)))
+}
+
+pub fn create_insecure_server_config(
+    server_cert: Vec<u8>,
+    server_key: Vec<u8>,
+) -> anyhow::Result<quinn::ServerConfig> {
+    let cert = CertificateDer::from(server_cert);
+    let key = PrivateKeyDer::try_from(server_key)
+        .map_err(|e| anyhow::anyhow!("Invalid private key: {}", e))?;
+
+    let mut rustls_config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)?;
+    rustls_config.alpn_protocols = vec![b"prism".to_vec()];
+
+    let quic_config = QuicServerConfig::try_from(rustls_config)?;
+
+    Ok(quinn::ServerConfig::with_crypto(Arc::new(quic_config)))
 }
 
 pub fn create_client_config(
