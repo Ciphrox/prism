@@ -9,3 +9,5 @@ rcgen = { version = "0.14", features = ["pem"] }
 anyhow = "1.0.102"
 rustls = "0.23.40"
 quinn = "0.11.9"
+spake2 = "0.4.0"
+rand = "0.10.1"
