@@ -61,6 +61,7 @@ pub async fn client_pair(
         .map_err(|e| anyhow::anyhow!("SPAKE2 failed {}", e))?;
 
     send.write_all(client_cert_der).await?;
+    send.finish()?;
     let server_cert = recv.read_to_end(u16::MAX.into()).await?;
 
     Ok((server_cert, client_cert_der.to_vec()))
@@ -87,6 +88,7 @@ pub async fn server_pair(
 
     let client_cert = recv.read_to_end(u16::MAX.into()).await?;
     send.write_all(server_cert_der).await?;
+    send.finish()?;
 
     Ok(client_cert)
 }
