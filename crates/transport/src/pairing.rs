@@ -59,7 +59,7 @@ pub async fn client_pair(
     pin: &str,
     client_name: &str,
     client_cert_der: &[u8],
-) -> Result<Vec<u8>> {
+) -> Result<(String, Vec<u8>)> {
     let (client_state, client_share) = Spake2::<Ed25519Group>::start_a(
         &Password::new(pin.as_bytes()),
         &Identity::new(b"prism-client"),
@@ -92,8 +92,9 @@ pub async fn client_pair(
     .await?;
 
     let recieved_msg = recv_msg(recv).await?;
-    let server_cert = match recieved_msg {
+    let (server_name, server_cert) = match recieved_msg {
         ControlMessage::PairAccept {
+            server_name,
             server_cert_der,
             mac: server_mac,
             ..
@@ -102,7 +103,7 @@ pub async fn client_pair(
             mac_verifier.update(&server_cert_der);
             mac_verifier.verify_slice(&server_mac)?;
 
-            server_cert_der
+            (server_name, server_cert_der)
         }
         ControlMessage::PairReject { reason } => {
             anyhow::bail!("Server Rejected pairing: {}", reason);
@@ -110,13 +111,14 @@ pub async fn client_pair(
         _ => anyhow::bail!("Expected PairAccept or PairReject"),
     };
 
-    Ok(server_cert)
+    Ok((server_name, server_cert))
 }
 
 pub async fn server_pair(
     send: &mut SendStream,
     recv: &mut RecvStream,
     state: &PairingState,
+    server_name: &str,
     server_cert_der: &[u8],
     client_ip: Ipv4Addr,
     subnet_mask: Ipv4Addr,
@@ -176,6 +178,7 @@ pub async fn server_pair(
             send_msg(
                 send,
                 &ControlMessage::PairAccept {
+                    server_name: server_name.to_string(),
                     server_cert_der: server_cert_der.to_vec(),
                     assigned_ip: client_ip,
                     subnet_mask,
@@ -191,7 +194,7 @@ pub async fn server_pair(
 }
 
 // Helpers
-async fn send_msg(send: &mut quinn::SendStream, msg: &ControlMessage) -> Result<()> {
+pub async fn send_msg(send: &mut quinn::SendStream, msg: &ControlMessage) -> Result<()> {
     let encoded = bincode::serde::encode_to_vec(msg, standard())?;
 
     let len_bytes = (encoded.len() as u32).to_le_bytes();
@@ -202,7 +205,7 @@ async fn send_msg(send: &mut quinn::SendStream, msg: &ControlMessage) -> Result<
     Ok(())
 }
 
-async fn recv_msg(recv: &mut quinn::RecvStream) -> Result<ControlMessage> {
+pub async fn recv_msg(recv: &mut quinn::RecvStream) -> Result<ControlMessage> {
     let mut len_bytes = [0u8; 4];
     recv.read_exact(&mut len_bytes).await?;
     let msg_len = u32::from_le_bytes(len_bytes) as usize;

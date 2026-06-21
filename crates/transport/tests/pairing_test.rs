@@ -31,6 +31,7 @@ async fn test_pairing_success() {
             &mut send,
             &mut recv,
             &pairing_state,
+            "test-server",
             &server_cert_for_server,
             client_ip,
             subnet_mask,
@@ -49,11 +50,12 @@ async fn test_pairing_success() {
 
     let conn = client.connect(&addr, client_config).await.unwrap();
     let (mut send, mut recv) = conn.open_bi().await.unwrap();
-    let server_cert_received =
+    let (server_name, server_cert_received) =
         client_pair(&mut send, &mut recv, &pin, "test-client", &client_cert)
             .await
             .unwrap();
 
+    assert_eq!(server_name, "test-server");
     assert_eq!(server_cert_received, server_cert);
 
     let _srv_conn = server_task.await.unwrap();
@@ -83,6 +85,7 @@ async fn test_wrong_pin_rejected() {
             &mut send,
             &mut recv,
             &pairing_state,
+            "test-server",
             &server_cert_for_server,
             client_ip,
             subnet_mask,
@@ -98,8 +101,7 @@ async fn test_wrong_pin_rejected() {
     let mut client = Client::new().unwrap();
     let conn = client.connect(&addr, client_config).await.unwrap();
     let (mut send, mut recv) = conn.open_bi().await.unwrap();
-    let result =
-        client_pair(&mut send, &mut recv, wrong_pin, "test-client", &client_cert).await;
+    let result = client_pair(&mut send, &mut recv, wrong_pin, "test-client", &client_cert).await;
 
     assert!(result.is_err(), "client_pair should fail with wrong PIN");
 

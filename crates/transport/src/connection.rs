@@ -1,7 +1,7 @@
 use anyhow::Result;
 
-use quinn::{ClientConfig, Connection, Endpoint, ServerConfig};
-use std::net::SocketAddr;
+use quinn::{ClientConfig, Connection, Endpoint, EndpointConfig, ServerConfig, default_runtime};
+use std::net::{SocketAddr, UdpSocket as StdUdpSocket};
 
 pub struct Client {
     endpoint: Endpoint,
@@ -11,6 +11,15 @@ impl Client {
         Ok(Self {
             endpoint: Endpoint::client("[::]:0".parse()?)?,
         })
+    }
+
+    pub fn from_std_socket(socket: StdUdpSocket) -> Result<Self> {
+        let rt = default_runtime().ok_or_else(|| anyhow::anyhow!("No runtime"))?;
+        let wrapped = rt.wrap_udp_socket(socket)?;
+        let endpoint =
+            Endpoint::new_with_abstract_socket(EndpointConfig::default(), None, wrapped, rt)?;
+
+        Ok(Self { endpoint })
     }
 
     pub async fn connect(&mut self, server_addr: &str, config: ClientConfig) -> Result<Connection> {
@@ -31,6 +40,19 @@ impl Server {
         Ok(Self {
             endpoint: Endpoint::server(config, addr.parse()?)?,
         })
+    }
+
+    pub fn from_std_socket(socket: StdUdpSocket, config: ServerConfig) -> Result<Self> {
+        let rt = default_runtime().ok_or_else(|| anyhow::anyhow!("No runtime"))?;
+        let wrapped = rt.wrap_udp_socket(socket)?;
+        let endpoint = Endpoint::new_with_abstract_socket(
+            EndpointConfig::default(),
+            Some(config),
+            wrapped,
+            rt,
+        )?;
+
+        Ok(Self { endpoint })
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr> {

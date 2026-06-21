@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TunnelPacket {
-    pub seq: u64,
+    pub seq: u16,
     pub payload: Vec<u8>,
 }
 
@@ -25,6 +25,7 @@ pub enum ControlMessage {
     },
 
     PairAccept {
+        server_name: String,
         server_cert_der: Vec<u8>,
         assigned_ip: Ipv4Addr,
         subnet_mask: Ipv4Addr,
@@ -33,5 +34,15 @@ pub enum ControlMessage {
 
     PairReject {
         reason: String,
+    },
+
+    ClientPublicAddr {
+        ip: Ipv4Addr,
+        port: u16,
+    },
+
+    ServerPublicAddr {
+        ip: Ipv4Addr,
+        port: u16,
     },
 }
