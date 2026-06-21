@@ -1,0 +1,21 @@
+[package]
+name = "transport"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+protocol = { path = "../protocol" }
+rcgen = { version = "0.14", features = ["pem"] }
+anyhow = "1.0.102"
+rustls = { version = "0.23.40", features = ["aws-lc-rs"] }
+quinn = { version = "0.11.9", default-features = false, features = [
+  "rustls-aws-lc-rs",
+  "runtime-tokio",
+] }
+spake2 = "0.4.0"
+rand = "0.10.1"
+tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "macros"] }
+bincode = { version = "2.0.1", features = ["serde"] }
+hmac = "0.13.0"
+sha2 = "0.11.0"
+stunclient = "0.4.2"
