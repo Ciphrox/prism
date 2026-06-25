@@ -1,9 +1,9 @@
-use std::path::PathBuf;
-use clap::{Parser, Subcommand};
 use anyhow::Result;
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
-mod server;
 mod client;
+mod server;
 
 #[derive(Parser)]
 #[command(name = "prism", about = "Multi-path network bonding VPN")]
@@ -29,6 +29,12 @@ enum ServerAction {
     Pair {
         #[arg(short, long)]
         listen: String,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    Start {
+        #[arg(long, default_value = "53999")]
+        port: u16,
     },
 }
 
@@ -39,6 +45,12 @@ enum ClientAction {
         server: String,
         #[arg(short, long)]
         pin: String,
+    },
+    Connect {
+        #[arg(long)]
+        name: String,
+        #[arg(short, long)]
+        server: String,
     },
 }
 
@@ -52,9 +64,18 @@ fn config_dir() -> PathBuf {
 async fn main() -> Result<()> {
     let cfg = config_dir();
     match Cli::parse().command {
-        Commands::Server { action: ServerAction::Pair { listen } } =>
-            server::pair(&listen, &cfg).await,
-        Commands::Client { action: ClientAction::Pair { server, pin } } =>
-            client::pair(&server, &pin, &cfg).await,
+        Commands::Server {
+            action: ServerAction::Pair { listen, name },
+        } => server::pair(&listen, &cfg, name).await,
+        Commands::Server {
+            action: ServerAction::Start { port },
+        } => server::start(&cfg, port).await,
+
+        Commands::Client {
+            action: ClientAction::Pair { server, pin },
+        } => client::pair(&server, &pin, &cfg).await,
+        Commands::Client {
+            action: ClientAction::Connect { name, server },
+        } => client::connect(&cfg, &name, &server).await,
     }
 }
