@@ -11,6 +11,7 @@ members = ["crates/*"]
 protocol = { path = "crates/protocol" }
 transport = { path = "crates/transport" }
 tunnel = { path = "crates/tunnel" }
+network = { path = "crates/network" }
 tokio = { version = "1.52.3", features = [
   "rt",
   "rt-multi-thread",

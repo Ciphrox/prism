@@ -1,7 +1,8 @@
 use anyhow::Result;
+use network::routes::PolicyRoute;
 use protocol::wire::ControlMessage;
 use std::{
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::Path,
     sync::Arc,
     time::Duration,
@@ -111,13 +112,16 @@ pub async fn connect(config_dir: &Path, server_name: &str, server_addr: &str) ->
         .connect(&server_public.to_string(), client_config)
         .await?;
 
+    let client_ip = Ipv4Addr::new(100, 64, 0, 2);
     let tun = Arc::new(
         TunDevice::open(&TunConfig {
-            ip: "100.64.0.2".parse()?,
+            ip: client_ip,
             ..Default::default()
         })
         .await?,
     );
+    let _routes = PolicyRoute::install("prism0").await?;
+
     println!("Connected to {} —  tunnel established", server_public);
 
     let tun_to_server = tokio::spawn({
@@ -127,7 +131,10 @@ pub async fn connect(config_dir: &Path, server_name: &str, server_addr: &str) ->
             let mut buf = vec![0u8; 1400];
             loop {
                 let n = tun.read(&mut buf).await?;
-                conn.send_datagram(buf[..n].to_vec().into())?;
+                if let Err(e) = conn.send_datagram(buf[..n].to_vec().into()) {
+                    eprintln!("dropped packet ({n} bytes): {e}");
+                    continue;
+                }
             }
 
             #[allow(unreachable_code)]
@@ -141,12 +148,18 @@ pub async fn connect(config_dir: &Path, server_name: &str, server_addr: &str) ->
 
         async move {
             loop {
-                let mut data = conn.read_datagram().await?.to_vec();
-                tun.write(&mut data).await?;
+                let mut data = match conn.read_datagram().await {
+                    Ok(d) => d.to_vec(),
+                    Err(e) => {
+                        eprintln!("read_datagram failed: {e}");
+                        break;
+                    }
+                };
+                if let Err(e) = tun.write(&mut data).await {
+                    eprintln!("tun write failed: {e}");
+                    continue;
+                }
             }
-
-            #[allow(unreachable_code)]
-            Ok::<_, anyhow::Error>(())
         }
     });
 
@@ -154,9 +167,14 @@ pub async fn connect(config_dir: &Path, server_name: &str, server_addr: &str) ->
         _ = tokio::signal::ctrl_c() => {
             println!("\nShutting down...");
         }
-        _ = tun_to_server => {}
-        _ = server_to_tun => {}
+        res = tun_to_server => {
+            println!("tun_to_server ended: {:?}", res);
+            anyhow::bail!("tun_to_server error");
+        }
+        res = server_to_tun => {
+            println!("server_to_tun ended: {:?}", res);
+            anyhow::bail!("server_to_tun error");
+        }
     }
-
     Ok(())
 }

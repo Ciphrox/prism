@@ -152,7 +152,10 @@ pub async fn start(config_dir: &Path, signal_port: u16) -> Result<()> {
             let mut buf = vec![0u8; 1400];
             loop {
                 let n = tun.read(&mut buf).await?;
-                conn.send_datagram(buf[..n].to_vec().into())?;
+                if let Err(e) = conn.send_datagram(buf[..n].to_vec().into()) {
+                    eprintln!("dropped packet ({n} bytes): {e}");
+                    continue;
+                }
             }
 
             #[allow(unreachable_code)]
@@ -166,12 +169,18 @@ pub async fn start(config_dir: &Path, signal_port: u16) -> Result<()> {
 
         async move {
             loop {
-                let mut data = conn.read_datagram().await?.to_vec();
-                tun.write(&mut data).await?;
+                let mut data = match conn.read_datagram().await {
+                    Ok(d) => d.to_vec(),
+                    Err(e) => {
+                        eprintln!("read_datagram failed: {e}");
+                        break;
+                    }
+                };
+                if let Err(e) = tun.write(&mut data).await {
+                    eprintln!("tun write failed: {e}");
+                    continue;
+                }
             }
-
-            #[allow(unreachable_code)]
-            Ok::<_, anyhow::Error>(())
         }
     });
 
@@ -179,9 +188,14 @@ pub async fn start(config_dir: &Path, signal_port: u16) -> Result<()> {
         _ = tokio::signal::ctrl_c() => {
             println!("\nShutting down...");
         }
-            _ = tun_to_client => {}
-            _ = client_to_tun => {}
+        res = tun_to_client => {
+            println!("tun_to_client ended: {:?}", res);
+            anyhow::bail!("tun_to_client error");
+        }
+        res = client_to_tun => {
+            println!("client_to_tun ended: {:?}", res);
+            anyhow::bail!("client_to_tun error");
+        }
     }
-
     Ok(())
 }

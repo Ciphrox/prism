@@ -19,3 +19,4 @@ bincode = { version = "2.0.1", features = ["serde"] }
 hmac = "0.13.0"
 sha2 = "0.11.0"
 stunclient = "0.4.2"
+socket2 = "0.6.4"

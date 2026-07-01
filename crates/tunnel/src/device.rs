@@ -59,7 +59,7 @@ impl Default for TunConfig {
             name: "prism0".to_string(),
             ip: Ipv4Addr::new(100, 64, 0, 2),
             netmask: Ipv4Addr::new(255, 255, 255, 0),
-            mtu: 1400,
+            mtu: 1100,
         }
     }
 }
