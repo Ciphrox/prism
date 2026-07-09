@@ -1,23 +1,27 @@
 use anyhow::Result;
 use protocol::wire::ControlMessage;
 use std::{
-    fs,
     net::{IpAddr, SocketAddr},
     path::Path,
+    sync::Arc,
 };
 use transport::{
-    auth::create_insecure_server_config,
+    auth::{create_insecure_server_config, create_server_config},
     connection::Server,
-    crypto::{load_or_generate_identity, save_trusted_cert},
+    crypto::{load_or_generate_identity, load_trusted_certs, save_trusted_cert},
     pairing::{PairingState, recv_msg, send_msg, server_pair},
     stun::{stun_query, udp_poke},
 };
+use tunnel::device::{TunConfig, TunDevice};
 
-pub async fn pair(listen: &str, config_dir: &Path) -> Result<()> {
+pub async fn pair(listen: &str, config_dir: &Path, name: Option<String>) -> Result<()> {
     let pairing = PairingState::new();
     println!("PIN: {}", pairing.pin());
 
-    let server_name = hostname::get()?.to_string_lossy().to_string();
+    let server_name = match name {
+        Some(n) => n,
+        None => hostname::get()?.to_string_lossy().to_string(),
+    };
 
     let (cert, key) = load_or_generate_identity(config_dir, &server_name)?;
 
@@ -77,8 +81,6 @@ pub async fn pair(listen: &str, config_dir: &Path) -> Result<()> {
             send.finish()?;
 
             let certs_dir = config_dir.join("trusted_clients");
-            fs::create_dir_all(&certs_dir)?;
-
             save_trusted_cert(&certs_dir, &client_name, &client_cert)?;
             println!("Paired with {} — client cert saved", peer);
         }
@@ -87,5 +89,113 @@ pub async fn pair(listen: &str, config_dir: &Path) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+pub async fn start(config_dir: &Path, signal_port: u16) -> Result<()> {
+    let server_name = hostname::get()?.to_string_lossy().to_string();
+    let (cert, key) = load_or_generate_identity(config_dir, &server_name)?;
+
+    let trusted = config_dir.join("trusted_clients");
+    let trusted_certs = load_trusted_certs(&trusted)?;
+
+    let stun = stun_query().await?;
+    let public_ip = match stun.public.ip() {
+        IpAddr::V4(ip) => ip,
+        _ => anyhow::bail!("STUN returned a non-IPv4 address"),
+    };
+
+    let signal_cfg = create_server_config(cert.clone(), key.clone(), trusted_certs.clone())?;
+
+    let signal_server = Server::bind(&format!("0.0.0.0:{}", signal_port), signal_cfg)?;
+    println!("Waiting for signal connection on port {}...", signal_port);
+
+    let (conn, _peer) = signal_server.accept().await?;
+    let (mut send, mut recv) = conn.accept_bi().await?;
+    println!("Signal Connection Established");
+
+    let client_public = match recv_msg(&mut recv).await? {
+        ControlMessage::ClientPublicAddr { ip, port } => (ip, port),
+        _ => anyhow::bail!("Expected ClientPublicAddr"),
+    };
+    send_msg(
+        &mut send,
+        &ControlMessage::ServerPublicAddr {
+            ip: public_ip,
+            port: stun.public.port(),
+        },
+    )
+    .await?;
+    send.finish()?;
+    drop(conn);
+
+    let client_addr = SocketAddr::new(IpAddr::V4(client_public.0), client_public.1);
+    udp_poke(&stun.socket, client_addr)?;
+
+    let secure_config = create_server_config(cert.clone(), key, trusted_certs)?;
+    let server = Server::from_std_socket(stun.socket, secure_config)?;
+    let (conn, peer) = server.accept().await?;
+
+    let tun = Arc::new(
+        TunDevice::open(&TunConfig {
+            ip: "100.64.0.1".parse()?,
+            ..Default::default()
+        })
+        .await?,
+    );
+    println!("Client connected from {} —  tunnel established", peer);
+
+    let tun_to_client = tokio::spawn({
+        let tun = tun.clone();
+        let conn = conn.clone();
+        async move {
+            let mut buf = vec![0u8; 1400];
+            loop {
+                let n = tun.read(&mut buf).await?;
+                if let Err(e) = conn.send_datagram(buf[..n].to_vec().into()) {
+                    eprintln!("dropped packet ({n} bytes): {e}");
+                    continue;
+                }
+            }
+
+            #[allow(unreachable_code)]
+            Ok::<_, anyhow::Error>(())
+        }
+    });
+
+    let client_to_tun = tokio::spawn({
+        let tun = tun.clone();
+        let conn = conn.clone();
+
+        async move {
+            loop {
+                let mut data = match conn.read_datagram().await {
+                    Ok(d) => d.to_vec(),
+                    Err(e) => {
+                        eprintln!("read_datagram failed: {e}");
+                        break;
+                    }
+                };
+                if let Err(e) = tun.write(&mut data).await {
+                    eprintln!("tun write failed: {e}");
+                    continue;
+                }
+            }
+        }
+    });
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            println!("\nShutting down...");
+        }
+        res = tun_to_client => {
+            println!("tun_to_client ended: {:?}", res);
+            anyhow::bail!("tun_to_client error");
+        }
+        res = client_to_tun => {
+            println!("client_to_tun ended: {:?}", res);
+            anyhow::bail!("client_to_tun error");
+        }
+    }
     Ok(())
 }

@@ -50,6 +50,31 @@ pub fn remove_trusted_cert(dir: &Path, common_name: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn load_server_cert(config_dir: &Path, server_name: &str) -> Result<Vec<u8>> {
+    let trusted = config_dir.join("trusted_servers");
+    let cert_file_name = server_name.to_string() + ".der";
+
+    if !trusted.exists() {
+        anyhow::bail!("No Trusted Servers found");
+    }
+
+    let server_cert = fs::read_dir(trusted)?
+        .filter_map(|entry| entry.ok())
+        .find_map(|entry| {
+            let path = entry.path();
+
+            if path.file_name().and_then(|name| name.to_str()) == Some(&cert_file_name) {
+                return Some(fs::read(path));
+            }
+            None
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!("No trusted servers with the name [{}] found", server_name)
+        })??;
+
+    Ok(server_cert)
+}
+
 pub fn load_or_generate_identity(
     config_dir: &Path,
     common_name: &str,
